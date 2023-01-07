@@ -1,0 +1,7 @@
+*.png
+flagged
+configs
+*.cfg
+*.yml
+__pycache__
+*.pyc
