@@ -5,3 +5,4 @@ configs
 *.yml
 __pycache__
 *.pyc
+data
