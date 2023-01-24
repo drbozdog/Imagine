@@ -1,22 +1,50 @@
 
+import uuid
 from PIL import Image
 from diffusers import StableDiffusionDepth2ImgPipeline, StableDiffusionPipeline, StableDiffusionImg2ImgPipeline
 import torch
+from pathlib import Path
+import os
 
 class ImageGeneration():
     def __init__(self) -> None:
         self.model_id = "stabilityai/stable-diffusion-2"
-        self.steps = 50
+        self.steps = 40
         self.negative_prompts = ''
         self.positive_prompts = ''
         self.height = 768
         self.width = 768
 
-        self.depthpipe = StableDiffusionDepth2ImgPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-2-depth",torch_dtype=torch.float16
-        )
-        self.depthpipe = self.depthpipe.to("cuda")
-        self.depthpipe.enable_attention_slicing()
+        self.generated_image_folder = Path("data","generated_images")
+        self.current_method = None
+        self.pipeline = None
+
+
+    def get_pipeline(self, method='Depth'):
+        # using process call nvidia-smi and print the output
+        print(os.system('nvidia-smi'))
+        if self.current_method != method:
+            if torch.cuda.is_available():
+                if self.pipeline:
+                    del self.pipeline
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+                print("GPU cache cleared")
+                print(os.system('nvidia-smi'))
+            if method == 'Depth':
+                pipeline = StableDiffusionDepth2ImgPipeline.from_pretrained("stabilityai/stable-diffusion-2-depth")
+                pipeline.to('cuda')
+                pipeline.enable_attention_slicing()
+            elif method == 'Image':
+                pipeline = StableDiffusionImg2ImgPipeline.from_pretrained("stabilityai/stable-diffusion-2-1")
+                pipeline.to('cuda')
+                pipeline.enable_attention_slicing()
+            self.current_method = method
+            self.pipeline = pipeline
+            return pipeline
+        else:
+            return self.pipeline
+            
 
 
     def get_prompts_for_style(style='photography'):
@@ -97,19 +125,18 @@ class ImageGeneration():
             negative_prompt = orig_negative_prompt,
         ).images[0]
 
-    def generate_image_from_image(self, image, text):
-        orig_prompt = "A "+text+", epic, exciting, wow, cinematic, moody, exciting, stop motion, highly detailed, octane render, soft lighting, professional, 35mm, Zeiss, Hasselblad, Fujifilm, Arriflex, IMAX, 4k, 8k"
-        orig_negative_prompt = "bright, oversaturated, ugly, 3d, render, cartoon, grain, low-res, kitsch, blender, cropped, lowres, poorly drawn face, out of frame, poorly drawn hands, blurry, bad art, blurred, text, watermark, disfigured, deformed, mangled"
-        pipeline = StableDiffusionImg2ImgPipeline.from_pretrained(self.model_id)
-        pipeline.to('mps')
+    def generate_image_from_image(self, image,text, extended_prompt,negative_prompt, override_options, intensity=0.7):
+        orig_prompt, orig_negative_prompt = self._ensemble_prompt(text, extended_prompt,negative_prompt, override_options)
 
+        
         resized_image = self._resize_image(image)
         
-        generated_image =  pipeline(
+        generated_image =  self.get_pipeline('Image')(
             prompt=orig_prompt,
             image=resized_image,
             num_inference_steps=self.steps,
             negative_prompt=orig_negative_prompt,
+            strength=intensity
         ).images[0]
         print(f'Generated image: {generated_image.size}')
         return generated_image
@@ -125,13 +152,19 @@ class ImageGeneration():
         
         init_image = self._resize_image(image)
 
+        # generate random experiment id
+        experiment_id = str(uuid.uuid4())
+
         # save the initial image to file
-        init_image.save('init_image.png')
+        init_image.save(self.generated_image_folder/ f'initial_image_{experiment_id}.png')
         
-        image = self.depthpipe(prompt=orig_prompt, image=init_image, negative_prompt=orig_negative_prompt, strength=1, 
+        image = self.get_pipeline('Depth')(prompt=orig_prompt, image=init_image, negative_prompt=orig_negative_prompt, strength=1, 
             num_inference_steps=self.steps
             ).images[0]
         print(f'Generated image: {image.size}')
+
+        image.save(self.generated_image_folder / f'generated_image_{experiment_id}.png')
+
         return image
 
     

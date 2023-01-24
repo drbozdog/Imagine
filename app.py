@@ -1,30 +1,47 @@
+import uuid
 import gradio as gr
 from managers.DepthEstimation import DepthEstimation
 from managers.ImageCaption import ImageCaption
 from managers.ImageGeneration import ImageGeneration
+from managers.InterpolationManager import InterpolationManager
 from managers.ObjectDetection import ObjectDetection
+from pathlib import Path
 
 # object_detection = ObjectDetection()
 image_captioning = ImageCaption()
 depth_estimation = DepthEstimation()
 image_generation = ImageGeneration()
+interpolation_manager = InterpolationManager()
 
-def predict(image, prompt,negative_prompt, override_options):
+data_folder = Path("data")
+generated_image_folder = Path(data_folder,"generated_images")
+generated_gifs = Path(data_folder,"generated_gifs")
+
+def predict(image, prompt,negative_prompt, override_options, method_options='Depth', intensity_value=0.8):
     print(type(image))
     print(f'The size of the image is {image.size}')
-
-    # detected_objects = object_detection.detect(image)
-    detected_objects = image
+    
     caption = image_captioning.generate_caption(image)
-    estimated_depth = depth_estimation.estimate_depth(image)
+
+    unique_random_id = str(uuid.uuid4())
+    generated_gif_path = generated_gifs / f'generated_gif_{unique_random_id}.gif'
+    resisez_image = image_generation._resize_image(image)
+    
+    if method_options == 'Image':
+        estimated_depth = resisez_image
+        generated_image = image_generation.generate_image_from_image(image, caption, extended_prompt=prompt,negative_prompt=negative_prompt, override_options=override_options, intensity=intensity_value)
+    else:
+        generated_image = image_generation.generate_image_from_depth(image, caption, extended_prompt=prompt,negative_prompt=negative_prompt, override_options=override_options)
+        estimated_depth = depth_estimation.estimate_depth(image)
+    
     # estimated_depth = image
     # generated_image = image_generation.generate_image(caption)
-    generated_image = image
     # generated_image_from_img = image_generation.generate_image_from_image(image, caption)
-    generated_image_from_img = image
-    generated_image_from_depth = image_generation.generate_image_from_depth(image, caption, extended_prompt=prompt,negative_prompt=negative_prompt, override_options=override_options)
 
-    return generated_image_from_depth, caption, estimated_depth, generated_image, generated_image_from_img, detected_objects
+   
+    interpolation_manager.merge_images_using_fade(resisez_image, generated_image, output_gif = generated_gif_path)
+
+    return generated_gif_path, caption, generated_image, estimated_depth
 
 # create gradio app to load image and predict
 def create_app():
@@ -32,6 +49,8 @@ def create_app():
     input_prompt = gr.inputs.Textbox(lines=2, label='Prompt')
     negative_prompt = gr.inputs.Textbox(lines=2, label='Negative Prompt')
     override_options = gr.inputs.Radio(['Append','Replace','Override'], label='Prompt options', default='Append')
+    method_options = gr.inputs.Radio(['Image','Depth'], label='Method', default='Depth')
+    intensity_value = gr.inputs.Slider(minimum=0, maximum=1, default=1, label='Intensity')
     input_image = gr.inputs.Image(label='Original Image',type='pil', source='upload')
     output_image = gr.outputs.Image(label='Generated Image',type='pil')
     output_caption = gr.outputs.Textbox(label='Original Image Caption',type='text')
@@ -41,13 +60,12 @@ def create_app():
     output_generated_img_from_depth = gr.outputs.Image(label='Generated image from depth',type='pil')
     app = gr.Interface(
         predict,
-        [input_image, input_prompt,negative_prompt, override_options],
-        outputs=[output_image,
+        [input_image, input_prompt,negative_prompt, override_options, method_options, intensity_value],
+        outputs=[
+                output_image,
                 output_caption, 
+                output_generated_img_from_depth,
                 output_depth_estimation, 
-                output_generated_img,
-                output_generated_img_from_img,
-                output_generated_img_from_depth
                 ],
     )
 
